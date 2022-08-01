@@ -292,6 +292,9 @@ class ScheduleView(
         else:  # resolve_schedule
             events = self._resolve_schedule(events)
 
+        # combine multiple-users same-shift events into one
+        events = self._merge_events(events)
+
         result = {
             "id": schedule.public_primary_key,
             "name": schedule.name,
@@ -299,6 +302,25 @@ class ScheduleView(
             "events": events,
         }
         return Response(result, status=status.HTTP_200_OK)
+
+    def _merge_events(self, events):
+        """Merge user groups same-shift events."""
+        if events:
+            merged = [events[0]]
+            current = merged[0]
+            for next_event in events[1:]:
+                if (
+                    current["start"] == next_event["start"]
+                    and current["shift"]["pk"] is not None
+                    and current["shift"]["pk"] == next_event["shift"]["pk"]
+                ):
+                    current["users"] += next_event["users"]
+                    current["missing_users"] += next_event["missing_users"]
+                else:
+                    merged.append(next_event)
+                    current = next_event
+            events = merged
+        return events
 
     def _resolve_schedule(self, events):
         """Calculate final schedule shifts considering rotations and overrides."""
@@ -394,7 +416,7 @@ class ScheduleView(
                 # event starts after the current interval, move to next interval and go through it
                 current_interval_idx += 1
 
-        resolved.sort(key=lambda e: e["start"])
+        resolved.sort(key=lambda e: (e["start"], e["shift"]["pk"]))
         return resolved
 
     @action(detail=True, methods=["get"])
